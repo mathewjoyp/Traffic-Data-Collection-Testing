@@ -1,0 +1,13 @@
+requests
+psycopg2-binary
+opencv-python-headless
+numpy
+osmnx==1.9.4
+selenium
+webdriver-manager
+python-dotenv
+Pillow
+geopy
+matplotlib
+scipy
+networkx
