@@ -150,11 +150,12 @@ def process_image(filename):
     img = img[CROP[0]:-CROP[1], CROP[2]:-CROP[3]] # Apply global crop
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
     
-    # --- GREEN TRAFFIC MASK (TESTING MODE) ---
-    lower_green = np.array([40, 50, 50])
-    upper_green = np.array([80, 255, 255])
-    mask = cv2.add(cv2.inRange(hsv, lower_green, upper_green), cv2.inRange(hsv, lower_green, upper_green))
-    # -----------------------------------------
+    # Red Traffic Mask
+    lower_red1 = np.array([0, 120, 70])
+    upper_red1 = np.array([10, 255, 255])
+    lower_red2 = np.array([170, 120, 70])
+    upper_red2 = np.array([180, 255, 255])
+    mask = cv2.add(cv2.inRange(hsv, lower_red1, upper_red1), cv2.inRange(hsv, lower_red2, upper_red2))
     
     circles = cv2.HoughCircles(mask, cv2.HOUGH_GRADIENT, 1, 20, param1=50, param2=15, minRadius=5, maxRadius=30)
     noise = np.zeros_like(mask)
@@ -164,7 +165,7 @@ def process_image(filename):
     
     final_mask = cv2.subtract(mask, noise)
     result = np.zeros_like(img)
-    result[final_mask > 0] = (0, 255, 0)
+    result[final_mask > 0] = (0, 0, 255)
     return result, img.shape
 
 def analyze_and_store(processed_img, img_shape, graph, graph_proj, actual_bbox, user_bbox, timestamp, region_id):
@@ -208,7 +209,7 @@ def analyze_and_store(processed_img, img_shape, graph, graph_proj, actual_bbox, 
             name = edge.get('name', 'Unnamed')
             if isinstance(name, list): name = name[0]
             
-            # --- EXTRACT ROAD GEOMETRY ---
+            # --- NEW: EXTRACT ROAD GEOMETRY ---
             if 'geometry' in edge:
                 coords = list(edge['geometry'].coords)
                 # Convert to [[lat, lon], [lat, lon]]
