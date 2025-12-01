@@ -13,7 +13,6 @@ from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 from pathlib import Path
 
-# --- MULTI-REGION CONFIGURATION ---
 REGIONS = [
     {
         "id": "region_1", 
@@ -29,14 +28,12 @@ REGIONS = [
     }
 ]
 
-# Shared Settings
 SCREENSHOT_FILENAME = "temp_screenshot.png"
 OUTPUT_IMAGE_FILENAME = "temp_traffic.png"
 WINDOW_WIDTH = 1920
 WINDOW_HEIGHT = 1080
 CROP = (100, 50, 50, 50) # Top, Bottom, Left, Right
 
-# --- GOOGLE MAPS MATH HELPERS ---
 class GoogleMapsCalculator:
     """Calculates real-world coordinates from pixel coordinates using Web Mercator."""
     TILE_SIZE = 256
@@ -80,7 +77,6 @@ class GoogleMapsCalculator:
 
         return (north, south, east, west)
 
-# --- HELPER FUNCTIONS ---
 
 def get_db_connection():
     try:
@@ -188,15 +184,13 @@ def analyze_and_store(processed_img, img_shape, graph, graph_proj, actual_bbox, 
         
         cX, cY = int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"])
         
-        # 1. Map pixel to real lat/lon using ACTUAL image bounds
+        #Map pixel to real lat/lon using ACTUAL image bounds
         lat, lon = map_pixels_to_geo([(cX, cY)], img_shape, actual_bbox)[0]
         
         try:
-            # 2. Find nearest road
             u, v, _ = ox.distance.nearest_edges(graph, X=[lon], Y=[lat], return_dist=False)[0]
             if (u, v) in processed_edges: continue
             
-            # 3. STRICT CHECK: Are both ends of the road inside the USER BBOX?
             u_node = graph.nodes[u]
             v_node = graph.nodes[v]
             
@@ -209,7 +203,6 @@ def analyze_and_store(processed_img, img_shape, graph, graph_proj, actual_bbox, 
             name = edge.get('name', 'Unnamed')
             if isinstance(name, list): name = name[0]
             
-            # --- NEW: EXTRACT ROAD GEOMETRY ---
             if 'geometry' in edge:
                 coords = list(edge['geometry'].coords)
                 # Convert to [[lat, lon], [lat, lon]]
@@ -218,7 +211,6 @@ def analyze_and_store(processed_img, img_shape, graph, graph_proj, actual_bbox, 
                 geometry_list = [[u_node['y'], u_node['x']], [v_node['y'], v_node['x']]]
             
             geometry_json = json.dumps(geometry_list)
-            # ----------------------------------
 
             sql = """INSERT INTO traffic_data 
                      (street_name, segment_length_meters, start_lat, start_lon, end_lat, end_lon, capture_timestamp, region_id, geometry) 
@@ -232,16 +224,15 @@ def analyze_and_store(processed_img, img_shape, graph, graph_proj, actual_bbox, 
     conn.close()
     return count
 
-# --- MAIN EXECUTION ---
 if __name__ == "__main__":
-    print("--- 🚦 Starting Precise Multi-Region Job ---")
+    print("--- 🚦 Starting Multi-Region Job ---")
     script_dir = Path(__file__).parent
     
     for region in REGIONS:
         rid = region['id']
         print(f"\n>>> Processing Region: {rid}")
         
-        # 1. Unzip Map
+        #Unzip Map
         zip_path = script_dir / region['zip_file']
         osm_path = script_dir / region['osm_file']
         
@@ -252,18 +243,18 @@ if __name__ == "__main__":
         with zipfile.ZipFile(zip_path, 'r') as z:
             z.extractall(script_dir)
             
-        # 2. Load Graph
+        #Load Graph
         graph, graph_proj = get_road_network(osm_path, region['bbox'])
         if not graph: continue
         
-        # 3. Calculate Map Parameters
+        #Calculate Map Parameters
         center_lat, center_lon, zoom = calculate_map_params(region['bbox'])
         
-        # 4. Capture
+        #Capture
         if take_screenshot(center_lat, center_lon, zoom, SCREENSHOT_FILENAME):
             proc_img, shape = process_image(SCREENSHOT_FILENAME)
             if proc_img is not None:
-                # 5. CALCULATE ACTUAL IMAGE BOUNDS
+
                 actual_bbox = GoogleMapsCalculator.get_actual_image_bounds(
                     center_lat, center_lon, zoom, 
                     WINDOW_WIDTH, WINDOW_HEIGHT, CROP
@@ -271,11 +262,11 @@ if __name__ == "__main__":
                 
                 ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                 
-                # 6. Analyze with Strict Boundary Check
+                #Analyze with Strict Boundary Check
                 saved = analyze_and_store(proc_img, shape, graph, graph_proj, actual_bbox, region['bbox'], ts, rid)
                 print(f"✅ {rid}: Saved {saved} records.")
                 
-        # Cleanup
+        #Cleanup
         if osm_path.exists(): os.remove(osm_path)
 
     print("\n--- All Regions Complete ---")
