@@ -6,6 +6,7 @@ import time
 import math
 import os
 import zipfile
+import json
 from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -16,13 +17,13 @@ from pathlib import Path
 REGIONS = [
     {
         "id": "region_1", 
-        "bbox": (28.64397, 28.62054, 77.23663, 77.20281),
+        "bbox": (28.64397, 28.62054, 77.23663, 77.20281), # New Delhi
         "zip_file": "map.osm.zip",
         "osm_file": "map.osm"
     },
     {
         "id": "region_2", 
-        "bbox": (10.79174, 10.75540, 76.68835, 76.62260),
+        "bbox": (10.79174, 10.75540, 76.68835, 76.62260), # Palakkad
         "zip_file": "map2.osm.zip",
         "osm_file": "map2.osm"
     }
@@ -68,8 +69,8 @@ class GoogleMapsCalculator:
         screen_top_y = center_y - (window_h / 2)
 
         # Apply Crop Offsets
-        img_start_x = screen_left_x + crop[2] # Left crop
-        img_start_y = screen_top_y + crop[0]  # Top crop
+        img_start_x = screen_left_x + crop[2] 
+        img_start_y = screen_top_y + crop[0]  
         img_end_x = screen_left_x + (window_w - crop[3]) 
         img_end_y = screen_top_y + (window_h - crop[1])
 
@@ -92,7 +93,6 @@ def get_db_connection():
         return None
 
 def map_pixels_to_geo(pixel_coords, img_shape, actual_bbox):
-    """Maps pixels to coords using the ACTUAL image bounds."""
     img_height, img_width, _ = img_shape
     north, south, east, west = actual_bbox
     
@@ -104,7 +104,6 @@ def map_pixels_to_geo(pixel_coords, img_shape, actual_bbox):
     return geo_coords
 
 def is_point_in_bbox(lat, lon, bbox):
-    """Checks if a point is strictly inside the User Requested BBox."""
     # bbox = (North, South, East, West)
     return (bbox[1] <= lat <= bbox[0]) and (bbox[3] <= lon <= bbox[2])
 
@@ -201,11 +200,8 @@ def analyze_and_store(processed_img, img_shape, graph, graph_proj, actual_bbox, 
             u_node = graph.nodes[u]
             v_node = graph.nodes[v]
             
-            u_in = is_point_in_bbox(u_node['y'], u_node['x'], user_bbox)
-            v_in = is_point_in_bbox(v_node['y'], v_node['x'], user_bbox)
-            
-            if not (u_in and v_in):
-                # Skip this road if it falls outside the requested region
+            if not (is_point_in_bbox(u_node['y'], u_node['x'], user_bbox) and 
+                    is_point_in_bbox(v_node['y'], v_node['x'], user_bbox)):
                 continue
 
             processed_edges.add((u, v))
@@ -213,10 +209,21 @@ def analyze_and_store(processed_img, img_shape, graph, graph_proj, actual_bbox, 
             name = edge.get('name', 'Unnamed')
             if isinstance(name, list): name = name[0]
             
+            # --- NEW: EXTRACT ROAD GEOMETRY ---
+            if 'geometry' in edge:
+                coords = list(edge['geometry'].coords)
+                # Convert to [[lat, lon], [lat, lon]]
+                geometry_list = [[y, x] for x, y in coords]
+            else:
+                geometry_list = [[u_node['y'], u_node['x']], [v_node['y'], v_node['x']]]
+            
+            geometry_json = json.dumps(geometry_list)
+            # ----------------------------------
+
             sql = """INSERT INTO traffic_data 
-                     (street_name, segment_length_meters, start_lat, start_lon, end_lat, end_lon, capture_timestamp, region_id) 
-                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s)"""
-            cursor.execute(sql, (name, edge.get('length', 0), u_node['y'], u_node['x'], v_node['y'], v_node['x'], timestamp, region_id))
+                     (street_name, segment_length_meters, start_lat, start_lon, end_lat, end_lon, capture_timestamp, region_id, geometry) 
+                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)"""
+            cursor.execute(sql, (name, edge.get('length', 0), u_node['y'], u_node['x'], v_node['y'], v_node['x'], timestamp, region_id, geometry_json))
             count += 1
         except Exception as e:
             print(f"Mapping Error: {e}")
@@ -239,7 +246,7 @@ if __name__ == "__main__":
         osm_path = script_dir / region['osm_file']
         
         if not zip_path.exists():
-            print(f"Skipping {rid}: Zip file {region['zip_file']} not found.")
+            print(f"Skipping {rid}: Zip not found.")
             continue
             
         with zipfile.ZipFile(zip_path, 'r') as z:
